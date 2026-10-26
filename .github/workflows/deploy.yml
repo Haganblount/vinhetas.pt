@@ -1,0 +1,70 @@
+name: Deploy to DreamHost
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "wp-content/**"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-dreamhost
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      DH_HOST: ${{ secrets.DH_HOST }}
+      DH_USER: ${{ secrets.DH_USER }}
+      DH_SITE_DIR: ${{ secrets.DH_SITE_DIR }}
+      DH_SSH_KEY: ${{ secrets.DH_SSH_KEY }}
+    steps:
+      - name: Check DreamHost secrets
+        id: secrets
+        run: |
+          missing=""
+          for s in DH_HOST DH_USER DH_SITE_DIR DH_SSH_KEY; do
+            [ -z "${!s}" ] && missing="$missing $s"
+          done
+          if [ -n "$missing" ]; then
+            echo "::warning::Skipping deploy. Missing secrets:$missing (see README)."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.secrets.outputs.ready == 'true'
+
+      - name: Lint PHP
+        if: steps.secrets.outputs.ready == 'true'
+        run: find wp-content -name '*.php' -print0 | xargs -0 -n1 php -l > /dev/null
+
+      - name: Set up SSH
+        if: steps.secrets.outputs.ready == 'true'
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$DH_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$DH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Check the site folder
+        if: steps.secrets.outputs.ready == 'true'
+        run: |
+          ssh -i ~/.ssh/deploy_key "$DH_USER@$DH_HOST" \
+            "test -f '$DH_SITE_DIR/wp-config.php' || { echo 'No wp-config.php in DH_SITE_DIR'; exit 1; }"
+
+      - name: Copy theme and plugin
+        if: steps.secrets.outputs.ready == 'true'
+        run: |
+          SSH="ssh -i $HOME/.ssh/deploy_key"
+          rsync -az --delete -e "$SSH" \
+            wp-content/themes/vinhetas/ "$DH_USER@$DH_HOST:$DH_SITE_DIR/wp-content/themes/vinhetas/"
+          rsync -az --delete -e "$SSH" \
+            wp-content/plugins/vinhetas-enquiries/ "$DH_USER@$DH_HOST:$DH_SITE_DIR/wp-content/plugins/vinhetas-enquiries/"
+
+      - name: Clean up key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

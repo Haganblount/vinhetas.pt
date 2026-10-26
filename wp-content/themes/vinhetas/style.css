@@ -1,0 +1,13 @@
+/*
+Theme Name: Vinhetas Algarve
+Theme URI: https://vinhetas.pt
+Author: Vinhetas Algarve S.A.
+Description: Landing site for Vinhetas Algarve, a private care campus planned near Silves. Swiss-grid layout from the Vinhetas Algarve design system. Photos and renderings are set under Appearance → Customize → Vinhetas media.
+Version: 1.0.0
+Requires at least: 6.4
+Requires PHP: 7.4
+License: Proprietary
+Text Domain: vinhetas
+*/
+
+/* Main styles live in assets/css/site.css so they can be cache-busted by version. */
