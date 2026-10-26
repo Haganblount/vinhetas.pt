@@ -174,11 +174,9 @@ a:hover { color: var(--onyx); }
 	content: ""; position: absolute; top: 0; bottom: 0; right: 100%; width: 100vw; background: var(--gold-dark);
 }
 
-/* Contact: dark green intro, light olive form, both full height */
-.v-contact { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); color: var(--white); }
+/* Contact: one light olive block */
+.v-contact { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); color: var(--white); background: var(--olive-light); }
 .v-contact a { color: var(--white); }
-.v-contact__intro { background: var(--oak); }
-.v-contact__form { background: var(--olive-light); }
 .v-contact__pad { padding-top: clamp(40px, 6vw, 80px); padding-bottom: clamp(40px, 6vw, 80px); }
 .v-contact__intro .v-contact__pad { padding-left: var(--edge); padding-right: clamp(24px, 4vw, 56px); }
 .v-contact__form .v-contact__pad { padding-left: clamp(24px, 4vw, 56px); padding-right: var(--edge); }
