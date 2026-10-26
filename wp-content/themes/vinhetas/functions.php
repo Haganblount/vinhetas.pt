@@ -33,10 +33,17 @@ add_action( 'after_setup_theme', 'vinhetas_setup' );
  */
 function vinhetas_assets() {
 	$css = get_template_directory() . '/assets/css/site.css';
+	// Rounded face for numbers where Arial Rounded / Helvetica Rounded isn't installed.
+	wp_enqueue_style(
+		'vinhetas-rounded',
+		'https://fonts.googleapis.com/css2?family=Nunito:wght@800&display=swap',
+		array(),
+		null
+	);
 	wp_enqueue_style(
 		'vinhetas',
 		get_template_directory_uri() . '/assets/css/site.css',
-		array(),
+		array( 'vinhetas-rounded' ),
 		file_exists( $css ) ? (string) filemtime( $css ) : VINHETAS_VERSION
 	);
 }
