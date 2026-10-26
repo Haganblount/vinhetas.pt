@@ -46,24 +46,46 @@ jobs:
         if: steps.secrets.outputs.ready == 'true'
         run: |
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
-          printf '%s\n' "$DH_SSH_KEY" > ~/.ssh/deploy_key
+          printf '%s\n' "$DH_SSH_KEY" | tr -d '\r' | sed '/./,$!d' > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -H "$DH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
 
       - name: Check the site folder
         if: steps.secrets.outputs.ready == 'true'
         run: |
-          ssh -i ~/.ssh/deploy_key "$DH_USER@$DH_HOST" \
-            "test -f '$DH_SITE_DIR/wp-config.php' || { echo 'No wp-config.php in DH_SITE_DIR'; exit 1; }"
+          # Trim stray spaces or a trailing slash from the folder secret.
+          DIR="$(printf '%s' "$DH_SITE_DIR" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's#/*$##')"
+          echo "DIR=$DIR" >> "$GITHUB_ENV"
+
+          if ! head -1 ~/.ssh/deploy_key | grep -q 'BEGIN OPENSSH PRIVATE KEY'; then
+            echo "::error::DH_SSH_KEY doesn't look like a private key. Copy it with: pbcopy < ~/.ssh/vinhetas_deploy (not the .pub file)."
+            exit 1
+          fi
+
+          if ! ssh -i ~/.ssh/deploy_key -o BatchMode=yes -o ConnectTimeout=20 "$DH_USER@$DH_HOST" "echo connected" ; then
+            echo "::error::SSH login failed for $DH_USER@$DH_HOST. Check DH_USER, DH_HOST and DH_SSH_KEY."
+            exit 1
+          fi
+
+          if ! ssh -i ~/.ssh/deploy_key -o BatchMode=yes "$DH_USER@$DH_HOST" "test -d '$DIR'"; then
+            echo "::error::Logged in, but the folder in DH_SITE_DIR doesn't exist on the server."
+            exit 1
+          fi
+
+          if ! ssh -i ~/.ssh/deploy_key -o BatchMode=yes "$DH_USER@$DH_HOST" "test -d '$DIR/wp-content'"; then
+            echo "::error::Logged in and found the folder, but there is no WordPress (wp-content) in it. Check DH_SITE_DIR."
+            exit 1
+          fi
+          echo "Site folder OK"
 
       - name: Copy theme and plugin
         if: steps.secrets.outputs.ready == 'true'
         run: |
           SSH="ssh -i $HOME/.ssh/deploy_key"
           rsync -az --delete -e "$SSH" \
-            wp-content/themes/vinhetas/ "$DH_USER@$DH_HOST:$DH_SITE_DIR/wp-content/themes/vinhetas/"
+            wp-content/themes/vinhetas/ "$DH_USER@$DH_HOST:$DIR/wp-content/themes/vinhetas/"
           rsync -az --delete -e "$SSH" \
-            wp-content/plugins/vinhetas-enquiries/ "$DH_USER@$DH_HOST:$DH_SITE_DIR/wp-content/plugins/vinhetas-enquiries/"
+            wp-content/plugins/vinhetas-enquiries/ "$DH_USER@$DH_HOST:$DIR/wp-content/plugins/vinhetas-enquiries/"
 
       - name: Clean up key
         if: always()
