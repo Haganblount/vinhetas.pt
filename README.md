@@ -62,6 +62,24 @@ Repo → **Settings → Secrets and variables → Actions → New repository sec
 
 Or over SSH: `cd ~/vinhetas.pt && wp theme activate vinhetas && wp plugin activate vinhetas-enquiries`
 
+## Email and spam protection (settings in wp-config.php, never in GitHub)
+
+vinhetas.pt mail is hosted at Proton, and the domain's SPF/DMARC only trust Proton. So the site sends its email through Proton SMTP. Set these on the server with WP-CLI (replace the token values):
+
+```sh
+ssh -i ~/.ssh/vinhetas_deploy vinhetas@vps35338.dreamhostps.com
+cd ~/vinhetas.pt
+wp config set VE_SMTP_USER ola@vinhetas.pt
+wp config set VE_SMTP_TOKEN 'PASTE-PROTON-SMTP-TOKEN'
+wp config set VE_TURNSTILE_SITE_KEY 'PASTE-SITE-KEY'
+wp config set VE_TURNSTILE_SECRET 'PASTE-SECRET-KEY'
+```
+
+- **Proton token:** Proton Mail → Settings → All settings → IMAP/SMTP → SMTP tokens → Generate token, for ola@vinhetas.pt.
+- **Turnstile keys:** Cloudflare dashboard → Turnstile → Add widget, hostname `vinhetas.pt` (and `www.vinhetas.pt`), widget mode **Invisible**.
+
+Each feature switches on only when its settings are present. With Turnstile on, nothing shows on the page; the check runs when Send is clicked. Enquiries sent without the check (script blocked) are kept and marked "[Unverified]".
+
 ## Day to day
 
 - **Photos and renderings:** Appearance → Customize → **Vinhetas media** (hero photo, three site photos, campus rendering). Empty slots show a grey placeholder with the size they need. Images live in WordPress, not GitHub, so deploys never remove them.

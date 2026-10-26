@@ -246,3 +246,4 @@ a:hover { color: var(--onyx); }
 	.ve-row { grid-template-columns: 1fr; }
 	.v-footer__inner { grid-template-columns: 1fr; }
 }
+.ve-ts:empty { display: none; }

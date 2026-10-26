@@ -18,6 +18,137 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 define( 'VE_POST_TYPE', 've_enquiry' );
 
+/*
+ * Settings live in wp-config.php on the server, never in GitHub:
+ *
+ *   VE_SMTP_USER          the Proton address that sends, e.g. ola@vinhetas.pt
+ *   VE_SMTP_TOKEN         a Proton SMTP token for that address
+ *   VE_TURNSTILE_SITE_KEY Cloudflare Turnstile site key (Invisible widget)
+ *   VE_TURNSTILE_SECRET   Cloudflare Turnstile secret key
+ *
+ * Each feature switches on only when its settings are present.
+ */
+
+/**
+ * Whether outgoing mail should go through Proton SMTP.
+ *
+ * @return bool
+ */
+function ve_smtp_ready() {
+	return defined( 'VE_SMTP_USER' ) && defined( 'VE_SMTP_TOKEN' ) && is_email( VE_SMTP_USER ) && '' !== VE_SMTP_TOKEN;
+}
+
+/**
+ * Send all site mail through Proton, so it passes vinhetas.pt's SPF, DKIM and DMARC checks.
+ *
+ * @param PHPMailer\PHPMailer\PHPMailer $mailer Mailer.
+ */
+function ve_smtp( $mailer ) {
+	if ( ! ve_smtp_ready() ) {
+		return;
+	}
+	$mailer->isSMTP();
+	$mailer->Host       = defined( 'VE_SMTP_HOST' ) ? VE_SMTP_HOST : 'smtp.protonmail.ch'; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+	$mailer->Port       = defined( 'VE_SMTP_PORT' ) ? (int) VE_SMTP_PORT : 587; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+	$mailer->SMTPSecure = 'tls'; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+	$mailer->SMTPAuth   = true; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+	$mailer->Username   = VE_SMTP_USER; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+	$mailer->Password   = VE_SMTP_TOKEN; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+	$mailer->setFrom( VE_SMTP_USER, 'Vinhetas Algarve', false );
+	$mailer->Sender = VE_SMTP_USER; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+}
+add_action( 'phpmailer_init', 've_smtp' );
+
+add_filter(
+	'wp_mail_from',
+	function ( $from ) {
+		return ve_smtp_ready() ? VE_SMTP_USER : $from;
+	}
+);
+add_filter(
+	'wp_mail_from_name',
+	function ( $name ) {
+		return ve_smtp_ready() ? 'Vinhetas Algarve' : $name;
+	}
+);
+
+/**
+ * Whether Turnstile spam protection is configured.
+ *
+ * @return bool
+ */
+function ve_turnstile_ready() {
+	return defined( 'VE_TURNSTILE_SITE_KEY' ) && defined( 'VE_TURNSTILE_SECRET' ) && '' !== VE_TURNSTILE_SITE_KEY && '' !== VE_TURNSTILE_SECRET;
+}
+
+/**
+ * Check a Turnstile token with Cloudflare.
+ *
+ * @param string $token Token from the form.
+ * @return bool
+ */
+function ve_turnstile_ok( $token ) {
+	if ( '' === $token ) {
+		return false;
+	}
+	$response = wp_remote_post(
+		'https://challenges.cloudflare.com/turnstile/v0/siteverify',
+		array(
+			'timeout' => 10,
+			'body'    => array(
+				'secret'   => VE_TURNSTILE_SECRET,
+				'response' => $token,
+			),
+		)
+	);
+	if ( is_wp_error( $response ) ) {
+		// Cloudflare unreachable: don't lose a real enquiry; the other checks still apply.
+		return true;
+	}
+	$body = json_decode( wp_remote_retrieve_body( $response ), true );
+	return ! empty( $body['success'] );
+}
+
+/**
+ * Invisible Turnstile: nothing shows on the page; the check runs when Send is clicked.
+ */
+function ve_turnstile_script() {
+	if ( ! ve_turnstile_ready() ) {
+		return;
+	}
+	wp_register_script( 've-turnstile', 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit', array(), null, true ); // phpcs:ignore WordPress.WP.EnqueuedResourceParameters.MissingVersion
+	wp_enqueue_script( 've-turnstile' );
+	$site_key = wp_json_encode( VE_TURNSTILE_SITE_KEY );
+	$inline   = <<<JS
+(function () {
+	var form = document.querySelector('.ve-form');
+	if (!form) { return; }
+	var holder = form.querySelector('.ve-ts');
+	var field = form.querySelector('input[name="ve_ts_token"]');
+	var widget = null;
+	var sending = false;
+	function ensure() {
+		if (widget !== null || !window.turnstile) { return; }
+		widget = window.turnstile.render(holder, {
+			sitekey: {$site_key},
+			execution: 'execute',
+			appearance: 'interaction-only',
+			callback: function (token) { field.value = token; sending = true; form.submit(); },
+			'error-callback': function () { sending = true; form.submit(); }
+		});
+	}
+	form.addEventListener('submit', function (e) {
+		if (sending || field.value) { return; }
+		if (!window.turnstile) { return; }
+		e.preventDefault();
+		ensure();
+		window.turnstile.execute(holder);
+	});
+})();
+JS;
+	wp_add_inline_script( 've-turnstile', $inline );
+}
+
 /**
  * Who the enquiry is from.
  *
@@ -124,6 +255,11 @@ function ve_shortcode() {
 			<label for="ve-message"><?php esc_html_e( 'Message', 'vinhetas-enquiries' ); ?></label>
 			<textarea id="ve-message" name="ve_message" maxlength="4000"></textarea>
 		</div>
+		<?php if ( ve_turnstile_ready() ) : ?>
+			<input type="hidden" name="ve_ts_token" value="">
+			<div class="ve-ts"></div>
+			<?php ve_turnstile_script(); ?>
+		<?php endif; ?>
 		<div class="ve-hp" aria-hidden="true">
 			<label for="ve-website">Website</label>
 			<input id="ve-website" name="ve_website" type="text" tabindex="-1" autocomplete="off">
@@ -184,6 +320,18 @@ function ve_handle_submit() {
 	if ( '' === $name || ! is_email( $email ) || ! $consent ) {
 		ve_back( 'missing' );
 	}
+
+	// Turnstile: a token that fails is a bot, dropped quietly. No token at all (script
+	// blocked, Cloudflare down) is kept but marked unverified, so no real enquiry is lost.
+	$unverified = false;
+	if ( ve_turnstile_ready() ) {
+		$token = isset( $_POST['ve_ts_token'] ) ? sanitize_text_field( wp_unslash( $_POST['ve_ts_token'] ) ) : '';
+		if ( '' === $token ) {
+			$unverified = true;
+		} elseif ( ! ve_turnstile_ok( $token ) ) {
+			ve_back( 'sent' );
+		}
+	}
 	if ( ! array_key_exists( $type, ve_types() ) ) {
 		$type = 'other';
 	}
@@ -196,7 +344,7 @@ function ve_handle_submit() {
 		array(
 			'post_type'   => VE_POST_TYPE,
 			'post_status' => 'private',
-			'post_title'  => $org ? $name . ' · ' . $org : $name,
+			'post_title'  => ( $unverified ? '[Unverified] ' : '' ) . ( $org ? $name . ' · ' . $org : $name ),
 			'meta_input'  => array(
 				've_name'       => $name,
 				've_org'        => $org,
